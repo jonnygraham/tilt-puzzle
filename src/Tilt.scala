@@ -9,14 +9,14 @@ sealed trait Piece extends BoardCell {
   def y:Int
 }
 
-sealed trait MoveablePiece extends Piece {
-  def copy(x: Int, y :Int) : MoveablePiece
+sealed trait MoveablePiece[P] extends Piece {
+  def move(x: Int = x, y :Int = y) : MoveablePiece[P]
 }
-case class GoodPiece(x: Int, y :Int) extends MoveablePiece {
-  def copy(x: Int, y :Int) = GoodPiece(x,y)
+case class GoodPiece(x: Int, y :Int) extends MoveablePiece[GoodPiece] {
+  def move(x: Int = x, y :Int = x) = copy(x,y)
 }
-case class BadPiece(x: Int, y :Int) extends MoveablePiece {
-  def copy(x: Int, y :Int) = BadPiece(x,y)
+case class BadPiece(x: Int, y :Int) extends MoveablePiece[BadPiece] {
+  def move(x: Int = x, y :Int = x) = copy(x,y)
 }
 case class Block(x: Int, y : Int) extends Piece
 case object Hole extends BoardCell
@@ -25,19 +25,7 @@ case object Space extends BoardCell
 
 object Tilt {
 
-  def movePiece2[P <: MoveablePiece](piece : P, xOffset : Int = 0, yOffset : Int = 0): P = {
-    piece match {
-      case GoodPiece(x,y) => GoodPiece(x + xOffset, y + yOffset)
-      case BadPiece(x,y) => BadPiece(x + xOffset, y + yOffset)
-    }
-  }.asInstanceOf[P]
-
-  def movePiece(piece : MoveablePiece, xOffset : Int = 0, yOffset : Int = 0): MoveablePiece = piece.copy(piece.x + xOffset, piece.y + yOffset)
-
-  /*
-  def movePiece(piece : GoodPiece, xOffset : Int = 0, yOffset : Int = 0) =  GoodPiece(piece.x + xOffset, piece.y + yOffset)
-  def movePiece(piece : BadPiece, xOffset : Int = 0, yOffset : Int = 0) =  BadPiece(piece.x + xOffset, piece.y + yOffset)
-    */
+  def movePiece[P](piece : MoveablePiece[P], xOffset : Int = 0, yOffset : Int = 0) = piece.move(piece.x + xOffset, piece.y + yOffset)
 
   case class Board(pieces : List[Piece],width : Int, height : Int) {
     val holePos = ((height-1)/2,(width-1)/2)
@@ -74,16 +62,20 @@ object Tilt {
   case object Left extends Dir
   case object Right extends Dir
 
-  def calcDistance(cellsInDir : List[BoardCell]) : Int = cellsInDir match {
-    case Nil => 0
-    case Hole :: rest => 1
-    case Space :: rest => 1 + calcDistance(rest)
-    case Block(_,_) :: rest => 0
-    case (p : Piece) :: rest => calcDistance(rest)
+  def calcDistance(cellsInDir : List[BoardCell]) : Int = {
+    def calcDistance0(cellsInDir : List[BoardCell],piecesInTheWay : Int, distance : Int) : Int =
+    cellsInDir match {
+      case Nil => distance
+      case Hole :: rest => piecesInTheWay + distance + 1
+      case Space :: rest => calcDistance0(rest,piecesInTheWay,distance+1)
+      case Block(_,_) :: rest => distance
+      case (p : Piece) :: rest => calcDistance0(rest,piecesInTheWay+1,distance)
+    }
+    calcDistance0(cellsInDir,0,0)
   }
   def move(board : Board, dir : Dir) = {
     val newPieces = {
-      val moveablePieces = board.pieces.collect{ case p : MoveablePiece if !(p.x == board.holePos._1 && p.y == board.holePos._2) => p}
+      val moveablePieces = board.pieces.collect{ case p : MoveablePiece[_] if !(p.x == board.holePos._1 && p.y == board.holePos._2) => p}
       val fixedPieces = board.pieces.filterNot(p => moveablePieces.contains(p))
       fixedPieces ::: {
         dir match {
@@ -119,36 +111,7 @@ object Tilt {
 
   val dirs : List[Dir]= List(Up,Down,Left,Right)
 
-  def findSolution(startBoard : Board) = {
-    def findSolution0(boards: List[(Board, List[(Dir, Board)])]): List[Dir] = {
-//      println("iter")
-      val validBoards = boards.flatMap { case (board, history) =>
-        if (isFailed(board)) None
-        else if (isSolved(board)) Some(board, history, true)
-        else Some(board, history, false)
-      }
-      if (validBoards.size == 0) Nil
-      else {
-        val sol = validBoards.collectFirst { case (_, history, true) => history.map(_._1).reverse.tail}
-        sol.getOrElse {
-          val nextBoards = validBoards.flatMap { case (board, history, _) =>
-            val nextBoards = dirs.flatMap { dir =>
-              val nextBoard = move(board, dir)
-              if (history.map(_._2).contains(nextBoard)) None
-              else Some(nextBoard, (dir, nextBoard) :: history)
-            }
-            nextBoards
-          }
-          findSolution0(nextBoards)
-
-        }
-      }
-    }
-    val init = List((startBoard, List((Start,startBoard))))
-    findSolution0(init)
-  }
-
-  def findSolution2(startBoard: Board) = {
+  def findSolution(startBoard: Board) = {
     def findSolution0(boards: List[(Board, List[Dir])], visited: Set[Board]): List[Dir] = {
       //      println("iter")
       boards match {
@@ -163,7 +126,7 @@ object Tilt {
           }
           val solution = nextBoards.collectFirst { case (b, path) if isSolved(b) => path}
           solution match {
-            case Some(path) => path
+            case Some(path) => path.reverse
             case None =>
               val newVisited = nextBoards.map(_._1).toSet ++ visited
               findSolution0(nextBoards, newVisited)
@@ -179,19 +142,28 @@ object Test extends  App {
 
   def solve(b : Board) = {
     println(b)
-    val sol = findSolution2(b)
-    println(s"Solution in ${sol.length} moves: $sol")
+    val sol = findSolution(b)
+    if (sol.length > 0) println(s"Solution in ${sol.length} moves: $sol")
+    else println("Cannot be solved!")
   }
-  solve(Board(List(GoodPiece(0,2),GoodPiece(1,2)),5,5))
-  solve(Board(List(GoodPiece(0,2),Block(3,0)),5,5))
+//  solve(Board(List(GoodPiece(0,2),GoodPiece(1,2)),5,5))
+//  solve(Board(List(GoodPiece(0,2),Block(3,0)),5,5))
+//
+//
+//  solve(Board(List(GoodPiece(0,0),Block(0,3),Block(3,0)),5,5))
+//  solve(Board(List(GoodPiece(0,0),BadPiece(0,1),Block(0,3),Block(3,0)),5,5))
+//  solve(Board(List(GoodPiece(0,0),BadPiece(2,0),BadPiece(0,1),Block(0,3),Block(3,0)),5,5))
+//  solve(Board(List(GoodPiece(0,0),BadPiece(2,0),BadPiece(0,1),Block(0,3),Block(3,0),Block(1,3)),5,5))
+//  solve(Board(List(GoodPiece(0,0),BadPiece(2,0),BadPiece(0,1),Block(0,3),Block(3,0),GoodPiece(1,2)),5,5))
+//
+//  solve(Board(List(BadPiece(0,0),GoodPiece(1,0),Block(2,0),BadPiece(0,4),GoodPiece(1,4)),5,5))
+//  solve(Board(List(Block(0,0),Block(2,0),GoodPiece(3,0),GoodPiece(4,0),BadPiece(3,1),Block(4,1),Block(3,2),Block(2,3)),5,5))
+//
+  solve(Board(List(Block(0,0),Block(2,1),Block(3,2),Block(2,3),Block(1,4),GoodPiece(4,0),GoodPiece(0,1),BadPiece(0,2),BadPiece(4,1)),5,5))
 
+  solve(Board(List(Block(4,0),Block(3,1),GoodPiece(4,1),BadPiece(3,0)),5,5))
 
-  solve(Board(List(GoodPiece(0,0),Block(0,3),Block(3,0)),5,5))
-  solve(Board(List(GoodPiece(0,0),BadPiece(0,1),Block(0,3),Block(3,0)),5,5))
-  solve(Board(List(GoodPiece(0,0),BadPiece(2,0),BadPiece(0,1),Block(0,3),Block(3,0)),5,5))
-  solve(Board(List(GoodPiece(0,0),BadPiece(2,0),BadPiece(0,1),Block(0,3),Block(3,0),Block(1,3)),5,5))
-  solve(Board(List(GoodPiece(0,0),BadPiece(2,0),BadPiece(0,1),Block(0,3),Block(3,0),GoodPiece(1,2)),5,5))
+  solve(Board(List(Block(2,0),Block(1,1),Block(3,3),Block(2,4),GoodPiece(4,0),GoodPiece(0,4)),5,5))
 
-  solve(Board(List(BadPiece(0,0),GoodPiece(1,0),Block(2,0),BadPiece(0,4),GoodPiece(1,4)),5,5))
-  solve(Board(List(Block(0,0),Block(2,0),GoodPiece(3,0),GoodPiece(4,0),BadPiece(3,1),Block(4,1),Block(3,2),Block(2,3)),5,5))
+  solve(Board(List(Block(2,1),Block(1,2),Block(3,2),Block(2,4),GoodPiece(2,0)),5,5))
 }
