@@ -136,6 +136,26 @@ object Tilt {
     val init = List((startBoard, Nil))
     findSolution0(init, Set(startBoard))
   }
+  def streamOfMoves(startBoard : Board) = {
+    def nextSetOfMoves(boards: List[(Board, List[Dir])], visited: Set[Board]): Stream[List[(Board, List[Dir])]] = {
+      boards match {
+        case Nil => Stream.empty
+        case boards =>
+          val nextBoards = boards.flatMap { case (board, path) =>
+            dirs.filter(d => path.headOption.map(lastD => d != lastD).getOrElse(true)).flatMap { dir =>
+              val nextBoard = move(board, dir)
+              if (visited.contains(nextBoard) || isFailed(nextBoard)) None
+              else Some(nextBoard, dir :: path)
+            }
+          }
+          val newVisited = nextBoards.map(_._1).toSet ++ visited
+          nextBoards #:: nextSetOfMoves(nextBoards, newVisited)
+      }
+    }
+    val init = List((startBoard, Nil))
+    nextSetOfMoves(init, Set(startBoard))
+  }
+
 }
 object Test extends  App {
   import Tilt._
@@ -145,9 +165,26 @@ object Test extends  App {
     val sol = findSolution(b)
     if (sol.length > 0) println(s"Solution in ${sol.length} moves: $sol")
     else println("Cannot be solved!")
+
+    println(solveByStream(b))
   }
-//  solve(Board(List(GoodPiece(0,2),GoodPiece(1,2)),5,5))
-//  solve(Board(List(GoodPiece(0,2),Block(3,0)),5,5))
+
+  def solveByStream(b : Board) = {
+//    println(b)
+    val s = streamOfMoves(b)
+    val movesToSol = s.dropWhile(bs => !bs.map(_._1).exists(isSolved)).take(1).toList
+      movesToSol match {
+        case Nil =>  "Cannot be solved!"
+        case boards :: Nil => boards.find(bs=>isSolved(bs._1)).map(res=>res._2.reverse).
+          map(moves=>s"Solution in ${moves.length} moves: $moves").getOrElse("Something went wrong")
+      }
+  }
+  solve(Board(List(GoodPiece(0,2),GoodPiece(1,2)),5,5))
+  solve(Board(List(GoodPiece(0,2),Block(3,0)),5,5))
+
+/*  val s = streamOfMoves(Board(List(GoodPiece(0,2),Block(3,0)),5,5))
+  val sol = s.dropWhile(bs => !bs.map(_._1).exists(isSolved)).take(1).last.find(bs=>isSolved(bs._1)).map(res=>res._2.reverse).map(moves=>s"Solution in ${moves.length} moves: $moves").getOrElse("Cannot be solved!")
+  println(sol)*/
 //
 //
 //  solve(Board(List(GoodPiece(0,0),Block(0,3),Block(3,0)),5,5))
